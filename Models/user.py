@@ -12,4 +12,4 @@ class User(Base):
 
     #define what the user can have and make it back populate to the user
     notes = relationship("UserNote", back_populates="user")
-    #molecules = relationship("Molecule", back_populates="user")
+    molecules = relationship("Molecule", back_populates="user")

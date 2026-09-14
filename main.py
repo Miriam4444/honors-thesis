@@ -20,21 +20,21 @@ app.add_middleware(
 )
 
 from Models.user import User
-'''
+
 from Models.userNote import UserNote
 from Models.molecule import Molecule
 from Models.molNote import MolNote
 from Models.atom import Atom
 from Models.bond import Bond
-'''
+
 
 Base.metadata.create_all(bind=engine)
-'''
+
 app.include_router(users.router)
 app.include_router(molecules.router)
 app.include_router(atoms.router)
 app.include_router(bonds.router)
 app.include_router(userNotes.router)
 app.include_router(molNotes.router)
-'''
+
 app.include_router(auth.router)
