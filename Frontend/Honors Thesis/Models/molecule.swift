@@ -16,6 +16,8 @@ struct MoleculeCreate: Codable {
     let name: String
 }
 
-
+extension Molecule {
+    static let sample = Molecule (idMolecule : 1, idUser: 1, name: "Water")
+}
 
 
