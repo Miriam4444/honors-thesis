@@ -10,20 +10,33 @@
 import SwiftUI
 
 struct ElementsSidebarView: View {
+    @ObservedObject var viewModel: MoleculeBuilderVM
     let elements = ["H", "C", "O"]
-    
+
     var body: some View {
-        VStack {
-            Text("elements")
+        VStack(spacing: 12) {
+            Text("Elements")
                 .font(.headline)
-            ForEach(elements, id: \.self) {
-                element in Text(element)
-                    .padding()
-                    .background(Color .purple.opacity(0.4)
-                        .cornerRadius(4)
-                        .draggable(element))
+            #if os(visionOS)
+            Text("Tap to add")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            #endif
+            ForEach(elements, id: \.self) { element in
+                Text(element)
+                    .font(.title2)
+                    .frame(width: 60, height: 60)
+                    .background(Color.purple.opacity(0.4))
+                    .cornerRadius(8)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.addAtomNearCenter(element: element) // tap = quick add
+                    }
+                    .draggable(element) // drag = drop it exactly where you want
             }
+            Spacer()
         }
         .padding()
+        .frame(width: 110)
     }
 }

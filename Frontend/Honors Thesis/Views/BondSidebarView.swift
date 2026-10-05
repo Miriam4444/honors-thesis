@@ -9,22 +9,25 @@ import SwiftUI
 
 struct BondSidebarView: View {
     @ObservedObject var viewModel: MoleculeBuilderVM
-    
+
     var body: some View {
-        VStack{
+        VStack(spacing: 12) {
             Text("Bonds")
                 .font(.headline)
             ForEach([BondType.single, .double, .triple], id: \.self) { type in
-                Text(type.rawValue.capitalized)
-                    .padding()
-                    .background(viewModel.selectedBondType == type ? Color.green.opacity(0.4) : Color.gray.opacity(0.2))
-                    .cornerRadius(4)
-                        .onTapGesture{
-                            viewModel.selectedBondType = type
-                        }
+                Button {
+                    viewModel.toggleBondType(type) // tap again to turn it off
+                } label: {
+                    Text(type.rawValue.capitalized)
+                        .frame(width: 80, height: 44)
+                        .background(viewModel.selectedBondType == type ? Color.green.opacity(0.4) : Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
             }
+            Spacer()
         }
         .padding()
+        .frame(width: 120)
     }
 }
-

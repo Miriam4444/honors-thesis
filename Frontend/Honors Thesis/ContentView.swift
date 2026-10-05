@@ -8,17 +8,15 @@
 import SwiftUI
 
 struct ContentView: View {
+    @ObservedObject var viewModel: MoleculeBuilderVM
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        // the molecule builder is the first screen for now
+        // later this is where login/registration will go first
+        MoleculeBuilderView(viewModel: viewModel)
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(viewModel: MoleculeBuilderVM())
 }
