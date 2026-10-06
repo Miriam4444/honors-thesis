@@ -11,9 +11,11 @@ struct UserNoteCreate: Codable {
     let idUser: Int
 }
 
-struct UserNote: Codable {
+struct UserNote: Codable, Identifiable {
     let idUserNotes: Int
     let name: String
     let note: String?
-    let idUser: Int
+    let idUser: Int?
+
+    var id: Int { idUserNotes }
 }

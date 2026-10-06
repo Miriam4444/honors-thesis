@@ -10,12 +10,13 @@ import Combine
 
 // tracks where the molecule is in the validate -> save flow
 enum ValidationState: Equatable {
-    case notChecked            // something changed since the last validate
-    case valid                 // passed validation, save is unlocked
-    case invalid(String)       // failed, the string says why
+    case notChecked            //like if something changed since the last validate
+    case valid                 //like if it passed validation sosave is unlocked
+    case invalid(String)       //failed and the string says why
 }
 
-// what a drag moves: just the atom you grabbed, or everything bonded to it
+//what a drag moves
+//either just the atom you grabbed or everything bonded to it
 enum MoveMode: String, CaseIterable, Identifiable {
     case atom = "Atom"
     case molecule = "Whole molecule"
@@ -23,12 +24,12 @@ enum MoveMode: String, CaseIterable, Identifiable {
 }
 
 class MoleculeBuilderVM: ObservableObject {
-    static let immersiveSpaceID = "MoleculeSpace" // name of the floating-in-the-room space
+    static let immersiveSpaceID = "MoleculeSpace" //this is the name of the floating in the room space
 
     @Published var atoms: [Atom] = [] //im initializing a list of Atom objects and it's starting off empty
     @Published var bonds: [Bond] = []
     @Published var selectedBondType: BondType? = nil //initializing a variable tracking which bond type im using and rn its none
-    @Published var selectedAtomIDsForBonding: [Int] = [] // im initializing a list of all of the atom ids that im gonna bebonding and its empty rn
+    @Published var selectedAtomIDsForBonding: [Int] = [] // m initializing a list of all of the atom ids that im gonna bebonding and its empty rn
     @Published var validationState: ValidationState = .notChecked
     #if os(visionOS)
     @Published var statusMessage: String = "Tap an element to add it, then grab it to move it"
@@ -40,18 +41,78 @@ class MoleculeBuilderVM: ObservableObject {
     @Published var isSpaceOpen = false
     @Published var moleculeName = ""
     @Published var isSaving = false
+    @Published var isLoading = false
+    @Published var notes: [MolNote] = [] //this molecule's notes (saved ones and ones waiting for the first save)
+    @Published var savedMoleculeID: Int? = nil //nil  if it's never saved so save makes a new molecule
+
+    //database rows that currently hold this molecule's atoms/bonds so saving again can replace them instead of making a duplicate molecule
+    private var savedAtomDBIDs: [Int] = []
+    private var savedBondDBIDs: [Int] = []
 
     //TODO: replace with the logged-in user's id once login is built
-    // (user 1 has to exist in the User table for saving to work)
+    //user 1 has to exist in the user table for saving to work
     var currentUserID = 1
 
     //this is just for now bc my frontend isn't connected to my backend yet
     private var nextAtomID = 1
     private var nextBondID = 1
 
-    // save only works after a successful validate
+    //save only works after a successful validate
     var canSave: Bool {
         validationState == .valid && !isSaving
+    }
+
+    //structure info only makes sense for a molecule that passed validation
+    var canSeeInfo: Bool {
+        validationState == .valid
+    }
+
+    // MARK: - starting / opening a molecule
+
+    //fresh empty builder
+    func startNew() {
+        atoms = []
+        bonds = []
+        notes = []
+        moleculeName = ""
+        savedMoleculeID = nil
+        savedAtomDBIDs = []
+        savedBondDBIDs = []
+        selectedAtomIDsForBonding = []
+        selectedBondType = nil
+        nextAtomID = 1
+        nextBondID = 1
+        moleculeChanged()
+        #if os(visionOS)
+        statusMessage = "Tap an element to add it, then grab it to move it"
+        #else
+        statusMessage = "Drag an element into the space to start"
+        #endif
+    }
+
+    //open a saved molecule from the home page
+    func open(_ molecule: Molecule) async {
+        startNew()
+        moleculeName = molecule.name
+        isLoading = true
+        statusMessage = "Loading \(molecule.name)..."
+        do {
+            let loaded = try await MoleculeService.loadMolecule(id: molecule.idMolecule)
+            //the database ids become the app ids, which is fine since they're unique
+            atoms = loaded.atoms
+            bonds = loaded.bonds
+            notes = loaded.notes
+            savedMoleculeID = molecule.idMolecule
+            savedAtomDBIDs = loaded.atoms.map { $0.idAtom }
+            savedBondDBIDs = loaded.bonds.map { $0.idBond }
+            //new atoms/bonds need ids that don't clash with the loaded ones
+            nextAtomID = (atoms.map { $0.idAtom }.max() ?? 0) + 1
+            nextBondID = (bonds.map { $0.idBond }.max() ?? 0) + 1
+            statusMessage = "Opened \(molecule.name)"
+        } catch {
+            statusMessage = "Couldn't open it: \(error.localizedDescription)"
+        }
+        isLoading = false
     }
 
     // MARK: - atoms
@@ -71,14 +132,19 @@ class MoleculeBuilderVM: ObservableObject {
         statusMessage = "Added \(element). Grab it to move it wherever you want."
     }
 
-    // backup for when drag-and-drop isn't working: tap an element to add it near the middle
-    // each new one is nudged over a bit so they don't land exactly on top of each other
+    //backup for when drag-and-drop isn't working: tap an element to add it near the middle
+    //each new one is nudged over a bit so they don't land exactly on top of each other
     func addAtomNearCenter(element: String) {
-        let nudge = Float(atoms.count % 5) * 0.1 - 0.2
+        #if os(visionOS)
+        let spacing: Float = 0.1   //10cm apart in the room
+        #else
+        let spacing: Float = 0.06  //closer together so they fit on a phone screen
+        #endif
+        let nudge = Float(atoms.count % 5 - 2) * spacing
         addAtom(element: element, at: (nudge, 0, 0))
     }
 
-    // moving an atom doesn't change the chemistry, so it doesn't reset validation
+    //moving an atom doesn't change the chemistry, so it doesn't reset validation
     func updateAtomPosition(atomID: Int, to position: (x: Float, y: Float, z: Float)) {
         guard let index = atoms.firstIndex(where: { $0.idAtom == atomID }) else { return }
         let atom = atoms[index]
@@ -92,14 +158,14 @@ class MoleculeBuilderVM: ObservableObject {
         )
     }
 
-    // used after a drag: saves the new spot for every atom that moved
+    //used after a drag: saves the new spot for every atom that moved
     func updateAtomPositions(_ positions: [Int: SIMD3<Float>]) {
         for (atomID, position) in positions {
             updateAtomPosition(atomID: atomID, to: (position.x, position.y, position.z))
         }
     }
 
-    // every atom connected to this one through bonds (including itself) = its molecule
+    //every atom connected to this one through bonds (including itself) = its molecule
     func connectedAtomIDs(startingAt atomID: Int) -> Set<Int> {
         var visited: Set<Int> = [atomID]
         var toVisit = [atomID]
@@ -120,7 +186,7 @@ class MoleculeBuilderVM: ObservableObject {
 
     // MARK: - bonds
 
-    // tapping the same bond type again turns bond mode off
+    //tapping the same bond type again turns bond mode off
     func toggleBondType(_ type: BondType) {
         if selectedBondType == type {
             selectedBondType = nil
@@ -138,7 +204,7 @@ class MoleculeBuilderVM: ObservableObject {
             return
         }
 
-        // tapping an atom you already picked unpicks it
+        //tapping an atom you already picked unpicks it
         if let index = selectedAtomIDsForBonding.firstIndex(of: atomID) {
             selectedAtomIDsForBonding.remove(at: index)
             return
@@ -161,7 +227,7 @@ class MoleculeBuilderVM: ObservableObject {
         let second = selectedAtomIDsForBonding[1]
         selectedAtomIDsForBonding = []
 
-        // don't allow two bonds between the same pair of atoms
+        //don't allow two bonds between the same pair of atoms
         let alreadyBonded = bonds.contains {
             ($0.idAtom1 == first && $0.idAtom2 == second) ||
             ($0.idAtom1 == second && $0.idAtom2 == first)
@@ -185,14 +251,14 @@ class MoleculeBuilderVM: ObservableObject {
 
     // MARK: - validate + save
 
-    // any change to atoms or bonds means you have to validate again before saving
+    //any change to atoms or bonds means you have to validate again before saving
     private func moleculeChanged() {
         validationState = .notChecked
     }
 
     func validate() {
         //TODO: replace this with the real chemistry validation (Validation/ in the backend)
-        // for now: anything with at least one atom passes
+        //for now anything with at least one atom passes
         if atoms.isEmpty {
             validationState = .invalid("Add at least one atom first")
             statusMessage = "Add at least one atom first"
@@ -215,20 +281,54 @@ class MoleculeBuilderVM: ObservableObject {
         // copies, so editing while it saves doesn't mix things up
         let atomsToSave = atoms
         let bondsToSave = bonds
+        let pendingNotes = notes.filter { $0.idMoleculeNotes == nil }
+        let isUpdate = savedMoleculeID != nil
 
         Task {
             do {
-                let moleculeID = try await MoleculeService.save(
+                let result = try await MoleculeService.save(
+                    existingMoleculeID: savedMoleculeID,
                     name: name,
                     userID: currentUserID,
                     atoms: atomsToSave,
-                    bonds: bondsToSave
+                    bonds: bondsToSave,
+                    oldAtomDBIDs: savedAtomDBIDs,
+                    oldBondDBIDs: savedBondDBIDs,
+                    pendingNotes: pendingNotes
                 )
-                statusMessage = "Saved \"\(name)\" to the database (molecule #\(moleculeID))"
+                savedMoleculeID = result.moleculeID
+                savedAtomDBIDs = result.atomDBIDs
+                savedBondDBIDs = result.bondDBIDs
+                // swap the waiting notes for their saved versions
+                notes = notes.filter { $0.idMoleculeNotes != nil } + result.savedNotes
+                statusMessage = isUpdate
+                    ? "Updated \"\(name)\""
+                    : "Saved \"\(name)\" to the database (molecule #\(result.moleculeID))"
             } catch {
                 statusMessage = "Save failed: \(error.localizedDescription)"
             }
             isSaving = false
+        }
+    }
+
+    // MARK: - notes
+
+    //if the molecule is already saved, the note goes straight to the database and if not it waits and gets saved together with the molecule
+    func addNote(name: String, text: String) async {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let noteText: String? = trimmedText.isEmpty ? nil : trimmedText
+
+        guard let moleculeID = savedMoleculeID else {
+            notes.append(MolNote(idMoleculeNotes: nil, name: name, note: noteText, idMolecule: nil))
+            statusMessage = "Note added. It'll be saved when you save the molecule."
+            return
+        }
+        do {
+            let saved = try await MoleculeService.addNote(name: name, text: noteText, moleculeID: moleculeID)
+            notes.append(saved)
+            statusMessage = "Note saved"
+        } catch {
+            statusMessage = "Couldn't save the note: \(error.localizedDescription)"
         }
     }
 

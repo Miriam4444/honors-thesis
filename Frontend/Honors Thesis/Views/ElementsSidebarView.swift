@@ -11,10 +11,13 @@ import SwiftUI
 
 struct ElementsSidebarView: View {
     @ObservedObject var viewModel: MoleculeBuilderVM
+    //vertical = sidebar and horizontal = row across the top/bottom
+    var axis: Axis = .vertical
     let elements = ["H", "C", "O"]
 
     var body: some View {
-        VStack(spacing: 12) {
+        let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+        layout {
             Text("Elements")
                 .font(.headline)
             #if os(visionOS)
@@ -23,20 +26,24 @@ struct ElementsSidebarView: View {
                 .foregroundStyle(.secondary)
             #endif
             ForEach(elements, id: \.self) { element in
-                Text(element)
-                    .font(.title2)
-                    .frame(width: 60, height: 60)
-                    .background(Color.purple.opacity(0.4))
-                    .cornerRadius(8)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        viewModel.addAtomNearCenter(element: element) // tap = quick add
-                    }
-                    .draggable(element) // drag = drop it exactly where you want
+                Button {
+                    viewModel.addAtomNearCenter(element: element) // tap = quick add
+                } label: {
+                    Text(element)
+                        .font(.title2)
+                        .frame(width: 60, height: 60)
+                        .background(Color.purple.opacity(0.4))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                #if !os(visionOS)
+                //drag = drop it exactly where you want (only on screens; you can't drag from the panel out into the room on Vision Pro, so it's left off there)
+                .draggable(element)
+                #endif
             }
             Spacer()
         }
-        .padding()
-        .frame(width: 110)
+        .padding(axis == .vertical ? 16 : 8)
+        .frame(width: axis == .vertical ? 110 : nil)
     }
 }

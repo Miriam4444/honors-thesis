@@ -5,7 +5,7 @@
 //  Created by Miriam Abecasis on 10/5/26.
 //
 //
-//  Talks to the FastAPI backend.
+//talks to FastAPI backend.
 
 import Foundation
 
@@ -24,8 +24,8 @@ enum APIError: LocalizedError {
 }
 
 struct APIClient {
-    // the simulator shares your Mac's network, so localhost = your Mac.
-    // on a real Vision Pro this has to be your Mac's IP address instead (like http://192.168.1.20:8000)
+    //simulator shares Mac's network, so localhost is the mac.
+    //on a real Vision Pro this has to be macs IP address instead
     static let baseURL = URL(string: "http://10.71.45.6:8000")!
     
     static func get<Response: Decodable>(_ path: String) async throws -> Response {
@@ -38,6 +38,20 @@ struct APIClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
+        return try await send(request)
+    }
+
+    static func put<Body: Encodable, Response: Decodable>(_ path: String, body: Body) async throws -> Response {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        return try await send(request)
+    }
+
+    static func delete<Response: Decodable>(_ path: String) async throws -> Response {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = "DELETE"
         return try await send(request)
     }
 

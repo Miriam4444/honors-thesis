@@ -12,6 +12,6 @@ struct User: Codable {
 }
 
 //delete this once i connect to backend
-extension User {
-    static let sample = User(idUser: 1, username: "miriam", email: "abecasis.miriam@gmail.com")
-}
+//extension User {
+//    static let sample = User(idUser: 1, username: "miriam", email: "abecasis.miriam@gmail.com")
+//}

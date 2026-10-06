@@ -8,23 +8,23 @@
 import SwiftUI
 import RealityKit
 
-// remembers where everything started when a drag begins
+//remembers where everything started when a drag begins
 private class DragState {
-    var startPositions: [Int: SIMD3<Float>] = [:] // atom id -> position when the drag started
+    var startPositions: [Int: SIMD3<Float>] = [:] //atom id -> position when the drag started
 }
 
 struct Molecule3DView: View {
     @ObservedObject var viewModel: MoleculeBuilderVM
-    // true = floating in the room (vision pro immersive space)
-    // false = inside a flat window (iPad / Mac), with drag-and-drop from the sidebar
+    //true = floating in the room (vision pro immersive space)
+    //false = inside a flat window (iPad / Mac) with drag-and-drop from the sidebar
     var isImmersive: Bool = false
     private let dragState = DragState()
 
     #if os(visionOS)
-    @Environment(\.physicalMetrics) private var physicalMetrics // converts screen points to real meters
+    @Environment(\.physicalMetrics) private var physicalMetrics //converts screen points to real meters
     #endif
 
-    @State private var isDropTargeted = false // true while you're dragging an element over the space
+    @State private var isDropTargeted = false //true while you're dragging an element over the space
 
     private let atomRadius: Float = 0.04
 
@@ -37,21 +37,20 @@ struct Molecule3DView: View {
         }
     }
 
-    // the 3D molecule itself, used by both versions
+    //the 3D molecule itself used by both versions
     private var moleculeScene: some View {
         RealityView { content in
-            // everything goes inside one "root" entity so drags have a parent to measure against
+            //everything goes inside one "root" entity so drags have a parent to measure against
             let root = Entity()
             root.name = "root"
             if isImmersive {
-                // in the room, (0,0,0) is the floor under your feet,
-                // so put the molecule about chest height and 80cm in front of you
+                //in the room, (0,0,0) is the floor under you
                 root.position = SIMD3(0, 1.3, -0.8)
             }
             content.add(root)
         } update: { content in
             guard let root = content.entities.first(where: { $0.name == "root" }) else { return }
-            // rebuild the scene from the view model every time it changes
+            //rebuild the scene from the view model every time it changes
             root.children.removeAll()
 
             for atom in viewModel.atoms {
@@ -74,18 +73,16 @@ struct Molecule3DView: View {
         .simultaneousGesture(dragGesture)
     }
 
-    // the flat-window version (iPad / Mac): same molecule, plus a drop zone for the sidebar
+    //the flat-window version (iPad / Mac): same molecule, plus a drop zone for the sidebar
     private var windowedScene: some View {
         GeometryReader { geometry in
             moleculeScene
                 .frame(width: geometry.size.width, height: geometry.size.height)
-                // a RealityView only "counts" where there's 3D stuff, so empty space can't catch drops.
-                // contentShape makes the whole rectangle count as a drop zone.
                 .contentShape(Rectangle())
-                // drop an element from the left sidebar right where you let go
+                //drop an element from the left sidebar right where you let go
                 .dropDestination(for: String.self) { droppedItems, location in
                     guard let element = droppedItems.first else { return false }
-                    // the 3D origin is the middle of this view, and y goes up in 3D but down on screen
+                    //the 3D origin is the middle of this view and y goes up in 3D but down on screen
                     let x = pointsToMeters(location.x - geometry.size.width / 2)
                     let y = -pointsToMeters(location.y - geometry.size.height / 2)
                     viewModel.addAtom(element: element, at: (x, y, 0))
@@ -93,7 +90,7 @@ struct Molecule3DView: View {
                 } isTargeted: { targeted in
                     isDropTargeted = targeted
                 }
-                // green outline while you're holding an element over the space, so you know you can let go
+                //green outline while you're holding an element over the space
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
                         .stroke(isDropTargeted ? Color.green : Color.gray.opacity(0.3), lineWidth: isDropTargeted ? 4 : 1)
@@ -122,13 +119,13 @@ struct Molecule3DView: View {
         #if os(visionOS)
         return Float(physicalMetrics.convert(points, to: .meters))
         #else
-        return Float(points) * 0.001 // same scale the 2D drag uses
+        return Float(points) * 0.001 //same scale the 2D drag uses
         #endif
     }
 
     // MARK: - gestures
 
-    // tap an atom to pick it for bonding
+    //tap an atom to pick it for bonding
     private var tapGesture: some Gesture {
         TapGesture()
             .targetedToAnyEntity()
@@ -139,7 +136,7 @@ struct Molecule3DView: View {
             }
     }
 
-    // drag an atom to move it (or its whole molecule, depending on the toggle)
+    //drag an atom to move it (or its whole molecule, depending on the toggle)
     private var dragGesture: some Gesture {
         DragGesture()
             .targetedToAnyEntity()
@@ -159,15 +156,15 @@ struct Molecule3DView: View {
                     }
                 }
 
-                // how far the drag has moved, in 3D meters
+                //how far the drag has moved in 3D meters
                 let delta: SIMD3<Float>
                 #if os(visionOS)
-                // on vision pro the drag has a real 3D location, so things follow your hand
+                //on vision pro the drag has a real 3D location so things follow your hand
                 let now = value.convert(value.location3D, from: .local, to: root)
                 let start = value.convert(value.startLocation3D, from: .local, to: root)
                 delta = now - start
                 #else
-                // on iPhone/iPad/Mac the drag is 2D, so move in x/y only
+                //on iPhone/iPad/Mac the drag is 2D so move in x/y only
                 delta = SIMD3(Float(value.translation.width) * 0.001,
                               -Float(value.translation.height) * 0.001,
                               0)
@@ -176,14 +173,14 @@ struct Molecule3DView: View {
                 for (id, startPosition) in dragState.startPositions {
                     root.findEntity(named: "atom-\(id)")?.position = startPosition + delta
                 }
-                layoutBonds(in: root) // bonds stretch along while you drag
+                layoutBonds(in: root) //bonds stretch along while you drag
             }
             .onEnded { value in
                 guard let root = value.entity.parent else {
                     dragState.startPositions = [:]
                     return
                 }
-                // save where everything ended up
+                //save where everything ended up
                 var finalPositions: [Int: SIMD3<Float>] = [:]
                 for id in dragState.startPositions.keys {
                     if let entity = root.findEntity(named: "atom-\(id)") {
@@ -211,8 +208,7 @@ struct Molecule3DView: View {
         }
     }
 
-    // puts every bond cylinder between its two atoms, using where the atom entities are right now
-    // (so it works mid-drag too, before the view model knows the new positions)
+    //puts every bond cylinder between its two atoms using where the atom entities are right now
     private func layoutBonds(in root: Entity) {
         for bond in viewModel.bonds {
             guard let atom1 = root.findEntity(named: "atom-\(bond.idAtom1)"),
@@ -226,7 +222,6 @@ struct Molecule3DView: View {
         }
     }
 
-    // one cylinder for single, two for double, three for triple, side by side
     private func place(_ cylinder: Entity, from start: SIMD3<Float>, to end: SIMD3<Float>, line: Int, of count: Int) {
         let delta = end - start
         let distance = simd_length(delta)
@@ -236,16 +231,14 @@ struct Molecule3DView: View {
         }
         cylinder.isEnabled = true
         let direction = delta / distance
-
-        // cylinders are made standing up along y, so rotate them to point from atom1 to atom2
         let up = SIMD3<Float>(0, 1, 0)
         if simd_dot(up, direction) < -0.9999 {
-            cylinder.orientation = simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)) // pointing straight down
+            cylinder.orientation = simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0))
         } else {
             cylinder.orientation = simd_quatf(from: up, to: direction)
         }
 
-        // a direction sideways to the bond, used to space out double/triple bond lines
+        //direction sideways to the bond, used to space out double/triple bond lines
         var side = simd_cross(direction, SIMD3(0, 0, 1))
         if simd_length(side) < 0.001 {
             side = simd_cross(direction, SIMD3(1, 0, 0))
@@ -255,10 +248,9 @@ struct Molecule3DView: View {
         let spacing: Float = 0.018
         let offset = (Float(line) - Float(count - 1) / 2) * spacing
         cylinder.position = (start + end) / 2 + side * offset
-        cylinder.scale = SIMD3(1, distance, 1) // the mesh is 1m tall, so this makes it exactly as long as the bond
+        cylinder.scale = SIMD3(1, distance, 1) //the mesh is 1m tall, so this makes it exactly as long as the bond
     }
 
-    // standard chemistry colors (CPK)
     private func color(for element: String) -> SimpleMaterial.Color {
         switch element {
         case "H": return .white
