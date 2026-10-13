@@ -17,6 +17,20 @@ private struct BondCreatedResponse: Decodable { let idBond: Int }
 private struct NoteCreatedResponse: Decodable { let idMoleculeNotes: Int }
 private struct MessageResponse: Decodable { let message: String }
 
+//what gets sent to /molecules/validate
+private struct ValidateAtom: Encodable { let idAtom: Int; let name: String }
+private struct ValidateBond: Encodable { let idAtom1: Int; let idAtom2: Int; let bondType: BondType }
+private struct ValidateRequest: Encodable { let atoms: [ValidateAtom]; let bonds: [ValidateBond] }
+
+//what /molecules/validate sends back
+struct ValidationIssue: Decodable { let atomId: Int?; let message: String }
+struct AtomPosition: Decodable { let atomId: Int; let x: Float; let y: Float; let z: Float }
+struct ValidationResult: Decodable {
+    let valid: Bool
+    let errors: [ValidationIssue]
+    let positions: [AtomPosition]?
+}
+
 //what a save hands back so the app knows which database rows belong to this molecule now
 struct SaveResult {
     let moleculeID: Int
@@ -26,11 +40,21 @@ struct SaveResult {
 }
 
 struct MoleculeService {
-
+    // MARK: - validation
+    static func validate(atoms: [Atom], bonds: [Bond]) async throws -> ValidationResult {
+        try await APIClient.post(
+            "molecules/validate",
+            body: ValidateRequest(
+                atoms: atoms.map { ValidateAtom(idAtom: $0.idAtom, name: $0.name) },
+                bonds: bonds.map { ValidateBond(idAtom1: $0.idAtom1, idAtom2: $0.idAtom2, bondType: $0.bondType) }
+            )
+        )
+    }
     // MARK: - saving
 
     //new molecule: creates molecule -> atoms -> bonds -> waiting notes
     //existing molecule: renames it, deletes its old atoms/bonds, then saves the current ones (the backend has no "replace all atoms" route, so delete + re-create is the simplest way)
+    
     static func save(
         existingMoleculeID: Int?,
         name: String,

@@ -44,6 +44,9 @@ class MoleculeBuilderVM: ObservableObject {
     @Published var isLoading = false
     @Published var notes: [MolNote] = [] //this molecule's notes (saved ones and ones waiting for the first save)
     @Published var savedMoleculeID: Int? = nil //nil  if it's never saved so save makes a new molecule
+    @Published var isValidating = false
+    @Published var problemAtomIDs: Set<Int> = [] //atoms the backend flagged, so the view can highlight them
+    private var validationRun = 0 //bumps on every edit so an old result can't unlock save
 
     //database rows that currently hold this molecule's atoms/bonds so saving again can replace them instead of making a duplicate molecule
     private var savedAtomDBIDs: [Int] = []
@@ -116,6 +119,27 @@ class MoleculeBuilderVM: ObservableObject {
     }
 
     // MARK: - atoms
+    
+    //RDKit gives positions in ångströms (O-H ≈ 0.96), the scene is in meters
+    #if os(visionOS)
+    private let angstromToScene: Float = 0.1   //matches your ~10cm spacing in the room
+    #else
+    private let angstromToScene: Float = 0.06  //matches the phone spacing
+    #endif
+
+    //snap atoms into the real geometry, keeping the molecule roughly where the user built it
+    private func applyGeometry(_ positions: [AtomPosition]) {
+        guard !atoms.isEmpty else { return }
+        let center = atoms.reduce(SIMD3<Float>(0, 0, 0)) {
+            $0 + SIMD3($1.xcoord, $1.ycoord, $1.zcoord)
+        } / Float(atoms.count)
+
+        var newPositions: [Int: SIMD3<Float>] = [:]
+        for p in positions {
+            newPositions[p.atomId] = center + SIMD3(p.x, p.y, p.z) * angstromToScene
+        }
+        updateAtomPositions(newPositions)
+    }
 
     func addAtom(element: String, at position: (x: Float, y: Float, z: Float)) {
         let newAtom = Atom(
@@ -254,20 +278,49 @@ class MoleculeBuilderVM: ObservableObject {
     //any change to atoms or bonds means you have to validate again before saving
     private func moleculeChanged() {
         validationState = .notChecked
+        problemAtomIDs = []
+        validationRun += 1
     }
 
     func validate() {
-        //TODO: replace this with the real chemistry validation (Validation/ in the backend)
-        //for now anything with at least one atom passes
         if atoms.isEmpty {
             validationState = .invalid("Add at least one atom first")
             statusMessage = "Add at least one atom first"
-        } else {
-            validationState = .valid
-            statusMessage = "Looks good! You can save now."
+            return
+        }
+
+        isValidating = true
+        statusMessage = "Checking your molecule..."
+        let run = validationRun
+        let atomsToCheck = atoms
+        let bondsToCheck = bonds
+
+        Task {
+            do {
+                let result = try await MoleculeService.validate(atoms: atomsToCheck, bonds: bondsToCheck)
+                //if they edited while it was checking, this result is for an old molecule so ignore it
+                guard run == validationRun else { isValidating = false; return }
+
+                if result.valid {
+                    if let positions = result.positions {
+                        withAnimation { applyGeometry(positions) }
+                    }
+                    validationState = .valid
+                    statusMessage = "Looks good! Snapped to the real shape. You can save now."
+                } else {
+                    problemAtomIDs = Set(result.errors.compactMap { $0.atomId })
+                    let first = result.errors.first?.message ?? "Something's off with this molecule"
+                    let extra = result.errors.count > 1 ? " (+\(result.errors.count - 1) more)" : ""
+                    validationState = .invalid(first)
+                    statusMessage = first + extra
+                }
+            } catch {
+                validationState = .invalid("Couldn't validate")
+                statusMessage = "Couldn't validate: \(error.localizedDescription)"
+            }
+            isValidating = false
         }
     }
-
     func save() {
         guard canSave else { return }
         let name = moleculeName.trimmingCharacters(in: .whitespacesAndNewlines)

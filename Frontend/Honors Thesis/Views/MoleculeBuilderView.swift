@@ -163,11 +163,12 @@ struct MoleculeBuilderView: View {
                 Button("Validate") {
                     viewModel.validate()
                 }
+                .disabled(viewModel.isValidating)
 
                 Button(viewModel.isSaving ? "Saving..." : "Save") {
                     viewModel.save()
                 }
-                .disabled(!viewModel.canSave) // locked until validate passes
+                .disabled(!viewModel.canSave) //locked until validate passes
             }
 
             HStack(spacing: 16) {

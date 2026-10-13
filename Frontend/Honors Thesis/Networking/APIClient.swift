@@ -26,7 +26,7 @@ enum APIError: LocalizedError {
 struct APIClient {
     //simulator shares Mac's network, so localhost is the mac.
     //on a real Vision Pro this has to be macs IP address instead
-    static let baseURL = URL(string: "http://10.71.45.6:8000")!
+    static let baseURL = URL(string: "http://10.71.51.201:8000")!
     
     static func get<Response: Decodable>(_ path: String) async throws -> Response {
         let request = URLRequest(url: baseURL.appendingPathComponent(path))
