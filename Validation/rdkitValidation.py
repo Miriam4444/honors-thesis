@@ -41,6 +41,6 @@ def validate_molecule(atoms, bonds):
         if atom.GetNumRadicalElectrons():
             errors.append({"atomId": app_id[atom.GetIdx()],
                            "message": f"{atom.GetSymbol()} still has open bonds"})
-        if errors:
-            return {"valid": False, "errors": errors}
-        return {"valid": True, "errors": [], "positions": generate_3d(m, app_id)}
+    if errors:
+        return {"valid": False, "errors": errors}
+    return {"valid": True, "errors": [], "positions": generate_3d(m, app_id)}
