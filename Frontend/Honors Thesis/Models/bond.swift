@@ -26,7 +26,7 @@ struct BondCreate: Codable {
     let bondType: BondType
 }
 
-extension Bond {
-    static let sampleBond1 = Bond(idBond: 1, idMolecule: 1, idAtom1: 1, idAtom2: 2, bondType: .single)
-    static let sampleBond2 = Bond(idBond: 2, idMolecule: 1, idAtom1: 1, idAtom2: 3, bondType: .double)
-}
+//extension Bond {
+//    static let sampleBond1 = Bond(idBond: 1, idMolecule: 1, idAtom1: 1, idAtom2: 2, bondType: .single)
+//    static let sampleBond2 = Bond(idBond: 2, idMolecule: 1, idAtom1: 1, idAtom2: 3, bondType: .double)
+//}

@@ -9,9 +9,12 @@ import SwiftUI
 
 struct BondSidebarView: View {
     @ObservedObject var viewModel: MoleculeBuilderVM
+    //vertical = sidebar (Vision Pro, iPad, Mac) and horizontal = a row across the top/bottom (iPhone)
+    var axis: Axis = .vertical
 
     var body: some View {
-        VStack(spacing: 12) {
+        let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+        layout {
             Text("Bonds")
                 .font(.headline)
             ForEach([BondType.single, .double, .triple], id: \.self) { type in
@@ -27,7 +30,7 @@ struct BondSidebarView: View {
             }
             Spacer()
         }
-        .padding()
-        .frame(width: 120)
+        .padding(axis == .vertical ? 16 : 8)
+        .frame(width: axis == .vertical ? 120 : nil)
     }
 }

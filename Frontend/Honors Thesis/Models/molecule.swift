@@ -11,13 +11,19 @@ struct Molecule: Codable {
     let name: String
 }
 
+extension Molecule: Identifiable {
+    var id: Int { idMolecule }
+}
+
+struct MoleculeUpdate: Codable {
+    let name: String
+}
+
 struct MoleculeCreate: Codable {
     let idUser: Int
     let name: String
 }
 
-extension Molecule {
-    static let sample = Molecule (idMolecule : 1, idUser: 1, name: "Water")
-}
-
-
+//extension Molecule {
+//    static let sample = Molecule (idMolecule : 1, idUser: 1, name: "Water")
+//}

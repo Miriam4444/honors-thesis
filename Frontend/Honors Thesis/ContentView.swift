@@ -11,9 +11,10 @@ struct ContentView: View {
     @ObservedObject var viewModel: MoleculeBuilderVM
 
     var body: some View {
-        // the molecule builder is the first screen for now
-        // later this is where login/registration will go first
-        MoleculeBuilderView(viewModel: viewModel)
+        //home page opens first rn but later the login/registration will go here
+        NavigationStack {
+            HomeView(builderVM: viewModel)
+        }
     }
 }
 
