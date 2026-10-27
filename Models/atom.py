@@ -11,5 +11,6 @@ class Atom(Base):
     xcoord = Column(Float, nullable=False)
     ycoord = Column(Float, nullable=False)
     zcoord = Column(Float, nullable=False)
+    charge = Column(Integer, nullable=False, default=0)
 
     molecule = relationship("Molecule", back_populates="atoms")
