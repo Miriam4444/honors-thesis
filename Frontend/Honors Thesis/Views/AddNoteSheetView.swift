@@ -4,7 +4,8 @@
 //
 //  Created by Miriam Abecasis on 10/6/26.
 //
-//Shows this molecule's notes and lets you write a new one.
+//This molecule's notes on iPhone / iPad / Mac: tap a note to edit it, swipe it to delete it,
+//or tap + to add a new one. (Vision Pro uses NotesPanelView instead.)
 
 import SwiftUI
 
@@ -12,42 +13,28 @@ struct AddNoteSheet: View {
     @ObservedObject var viewModel: MoleculeBuilderVM
     @Environment(\.dismiss) private var dismiss
 
-    @State private var title = ""
-    @State private var text = ""
-    @State private var isSaving = false
-
-    private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
-    }
+    @State private var editingNoteID: String? = nil //the note open in the editor
+    @State private var addingNote = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("New note") {
-                    TextField("Title", text: $title) // the database needs a name for every note
-                    TextEditor(text: $text)
-                        .frame(minHeight: 120)
+            List {
+                if viewModel.notes.isEmpty {
+                    Text("No notes yet. Tap + to add one.")
+                        .foregroundStyle(.secondary)
                 }
-
-                if !viewModel.notes.isEmpty {
-                    Section("Notes on this molecule") {
-                        ForEach(viewModel.notes) { note in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(note.name).font(.headline)
-                                    if note.idMoleculeNotes == nil {
-                                        // added before the molecule was saved
-                                        Text("not saved yet")
-                                            .font(.caption)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                                if let noteText = note.note {
-                                    Text(noteText)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+                ForEach(viewModel.notes) { note in
+                    Button {
+                        editingNoteID = note.id
+                    } label: {
+                        NoteRow(name: note.name, text: note.note, notSavedYet: note.idMoleculeNotes == nil)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            Task { await viewModel.deleteNote(note) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
@@ -57,19 +44,37 @@ struct AddNoteSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving..." : "Add") {
-                        Task {
-                            isSaving = true
-                            await viewModel.addNote(
-                                name: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                text: text
-                            )
-                            isSaving = false
-                            dismiss()
-                        }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        addingNote = true
+                    } label: {
+                        Label("New note", systemImage: "plus")
                     }
-                    .disabled(!canSave)
+                }
+            }
+            //new note
+            .sheet(isPresented: $addingNote) {
+                NoteEditorView(isNew: true,
+                               onSave: { title, text in
+                                   await viewModel.addNote(name: title, text: text)
+                                   return true
+                               },
+                               onClose: { addingNote = false })
+                    .padding()
+                    .presentationDetents([.medium, .large])
+            }
+            //edit an existing note
+            .sheet(isPresented: Binding(
+                get: { editingNoteID != nil },
+                set: { if !$0 { editingNoteID = nil } }
+            )) {
+                if let note = viewModel.notes.first(where: { $0.id == editingNoteID }) {
+                    NoteEditorView(title: note.name, text: note.note ?? "", isNew: false,
+                                   onSave: { title, text in await viewModel.updateNote(note, name: title, text: text) },
+                                   onDelete: { await viewModel.deleteNote(note) },
+                                   onClose: { editingNoteID = nil })
+                        .padding()
+                        .presentationDetents([.medium, .large])
                 }
             }
         }
@@ -77,4 +82,8 @@ struct AddNoteSheet: View {
         .frame(minWidth: 400, minHeight: 450) // mac sheets start tiny otherwise
         #endif
     }
+}
+
+#Preview {
+    AddNoteSheet(viewModel: MoleculeBuilderVM())
 }

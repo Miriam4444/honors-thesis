@@ -10,8 +10,11 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var builderVM: MoleculeBuilderVM //shared with builder and floating space)
+    @ObservedObject var auth: AuthManager
     @StateObject private var homeVM = HomeVM()
     @State private var showBuilder = false
+    @State private var editingNoteID: Int? = nil //the home page note open in the editor
+    @State private var addingNote = false
 
     var body: some View {
         List {
@@ -43,22 +46,38 @@ struct HomeView: View {
                 }
             }
 
-            Section("Notes") {
+            Section {
                 if homeVM.userNotes.isEmpty && !homeVM.isLoading {
                     Text("No notes yet")
                         .foregroundStyle(.secondary)
                 }
+                //tap a note to edit it, swipe it to delete it
                 ForEach(homeVM.userNotes) { note in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(note.name)
-                            .font(.headline)
-                        if let text = note.note, !text.isEmpty {
-                            Text(text)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                    Button {
+                        editingNoteID = note.id
+                    } label: {
+                        NoteRow(name: note.name, text: note.note)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            Task { await homeVM.deleteNote(note) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
+                }
+            } header: {
+                HStack {
+                    Text("Notes")
+                    Spacer()
+                    Button {
+                        addingNote = true
+                    } label: {
+                        Label("New note", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .textCase(nil) //section headers are all caps on iPhone; keep the button normal
                 }
             }
         }
@@ -76,6 +95,45 @@ struct HomeView: View {
                 } label: {
                     Label("New molecule", systemImage: "plus")
                 }
+            }
+            //who's signed in + log out
+            ToolbarItem(placement: .navigation) {
+                Menu {
+                    if let email = auth.email {
+                        Text("Signed in as \(email)")
+                    }
+                    Button(role: .destructive) {
+                        Task { await auth.logout() }
+                    } label: {
+                        Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    Label("Account", systemImage: "person.crop.circle")
+                }
+            }
+        }
+        //new home page note
+        .sheet(isPresented: $addingNote) {
+            NoteEditorView(isNew: true,
+                           onSave: { title, text in
+                               await homeVM.addNote(name: title, text: text, userID: builderVM.currentUserID)
+                           },
+                           onClose: { addingNote = false })
+                .padding()
+                .presentationDetents([.medium, .large])
+        }
+        //edit an existing home page note
+        .sheet(isPresented: Binding(
+            get: { editingNoteID != nil },
+            set: { if !$0 { editingNoteID = nil } }
+        )) {
+            if let note = homeVM.userNotes.first(where: { $0.id == editingNoteID }) {
+                NoteEditorView(title: note.name, text: note.note ?? "", isNew: false,
+                               onSave: { title, text in await homeVM.updateNote(note, name: title, text: text) },
+                               onDelete: { await homeVM.deleteNote(note) },
+                               onClose: { editingNoteID = nil })
+                    .padding()
+                    .presentationDetents([.medium, .large])
             }
         }
         .navigationDestination(isPresented: $showBuilder) {
@@ -95,6 +153,6 @@ struct HomeView: View {
 
 #Preview {
     NavigationStack {
-        HomeView(builderVM: MoleculeBuilderVM())
+        HomeView(builderVM: MoleculeBuilderVM(), auth: AuthManager())
     }
 }

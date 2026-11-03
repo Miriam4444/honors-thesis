@@ -77,9 +77,8 @@ class MoleculeBuilderVM: ObservableObject {
     private var savedAtomDBIDs: [Int] = []
     private var savedBondDBIDs: [Int] = []
 
-    //TODO: replace with the logged-in user's id once login is built
-    //user 1 has to exist in the user table for saving to work
-    var currentUserID = 1
+    //whoever is logged in (ContentView sets this from AuthManager; 0 = nobody)
+    var currentUserID = 0
 
     //this is just for now bc my frontend isn't connected to my backend yet
     private var nextAtomID = 1
@@ -608,6 +607,44 @@ class MoleculeBuilderVM: ObservableObject {
         } catch {
             statusMessage = "Couldn't save the note: \(error.localizedDescription)"
         }
+    }
+
+    //change a note's title/text. notes that are already in the database get updated there too;
+    //notes waiting for the first save just change here (they get saved with the molecule)
+    //returns false if it couldn't save, so the editor can stay open
+    @discardableResult
+    func updateNote(_ note: MolNote, name: String, text: String) async -> Bool {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let noteText: String? = trimmedText.isEmpty ? nil : trimmedText
+        if let noteID = note.idMoleculeNotes {
+            do {
+                try await MoleculeService.updateNote(id: noteID, name: name, text: noteText)
+            } catch {
+                statusMessage = "Couldn't update the note: \(error.localizedDescription)"
+                return false
+            }
+        }
+        if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            notes[index].name = name
+            notes[index].note = noteText
+        }
+        statusMessage = "Note updated"
+        return true
+    }
+
+    @discardableResult
+    func deleteNote(_ note: MolNote) async -> Bool {
+        if let noteID = note.idMoleculeNotes {
+            do {
+                try await MoleculeService.deleteNote(id: noteID)
+            } catch {
+                statusMessage = "Couldn't delete the note: \(error.localizedDescription)"
+                return false
+            }
+        }
+        notes.removeAll { $0.id == note.id }
+        statusMessage = "Note deleted"
+        return true
     }
 
     func clear() {

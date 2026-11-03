@@ -13,10 +13,16 @@ struct MolNoteCreate: Codable {
     let idMolecule: Int
 }
 
-struct MolNote: Codable, Identifiable {
-    var idMoleculeNotes: Int?
+//what gets sent when you edit a note (same for molecule notes and home page notes)
+struct NoteUpdate: Codable {
     let name: String
     let note: String?
+}
+
+struct MolNote: Codable, Identifiable {
+    var idMoleculeNotes: Int?
+    var name: String   //var so a note can be edited in place
+    var note: String?
     var idMolecule: Int?
 
     //temporary id for notes that aren't saved yet so lists can still show them

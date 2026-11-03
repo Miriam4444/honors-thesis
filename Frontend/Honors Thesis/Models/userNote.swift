@@ -13,8 +13,8 @@ struct UserNoteCreate: Codable {
 
 struct UserNote: Codable, Identifiable {
     let idUserNotes: Int
-    let name: String
-    let note: String?
+    var name: String   //var so a note can be edited in place
+    var note: String?
     let idUser: Int?
 
     var id: Int { idUserNotes }

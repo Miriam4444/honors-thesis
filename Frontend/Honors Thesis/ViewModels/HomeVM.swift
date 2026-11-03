@@ -29,4 +29,53 @@ class HomeVM: ObservableObject {
         }
         isLoading = false
     }
+
+    // MARK: - home page notes
+    //each returns false if the backend call failed (errorMessage says why), so the editor can stay open
+
+    @discardableResult
+    func addNote(name: String, text: String, userID: Int) async -> Bool {
+        do {
+            let note = try await MoleculeService.addUserNote(name: name, text: Self.cleaned(text), userID: userID)
+            userNotes.append(note)
+            return true
+        } catch {
+            errorMessage = "Couldn't add the note: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    @discardableResult
+    func updateNote(_ note: UserNote, name: String, text: String) async -> Bool {
+        let noteText = Self.cleaned(text)
+        do {
+            try await MoleculeService.updateUserNote(id: note.idUserNotes, name: name, text: noteText)
+            if let index = userNotes.firstIndex(where: { $0.id == note.id }) {
+                userNotes[index].name = name
+                userNotes[index].note = noteText
+            }
+            return true
+        } catch {
+            errorMessage = "Couldn't update the note: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    @discardableResult
+    func deleteNote(_ note: UserNote) async -> Bool {
+        do {
+            try await MoleculeService.deleteUserNote(id: note.idUserNotes)
+            userNotes.removeAll { $0.id == note.id }
+            return true
+        } catch {
+            errorMessage = "Couldn't delete the note: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    //empty text is saved as "no text" (nil) instead of an empty string
+    private static func cleaned(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

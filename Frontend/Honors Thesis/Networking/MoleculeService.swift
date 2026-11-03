@@ -15,6 +15,7 @@ private struct MoleculeCreatedResponse: Decodable { let idMolecule: Int }
 private struct AtomCreatedResponse: Decodable { let idAtom: Int }
 private struct BondCreatedResponse: Decodable { let idBond: Int }
 private struct NoteCreatedResponse: Decodable { let idMoleculeNotes: Int }
+private struct UserNoteCreatedResponse: Decodable { let idUserNotes: Int }
 private struct MessageResponse: Decodable { let message: String }
 
 //what gets sent to /molecules/validate
@@ -209,7 +210,33 @@ struct MoleculeService {
         return MolNote(idMoleculeNotes: created.idMoleculeNotes, name: name, note: text, idMolecule: moleculeID)
     }
 
+    static func updateNote(id noteID: Int, name: String, text: String?) async throws {
+        let _: MessageResponse = try await APIClient.put("molNotes/\(noteID)", body: NoteUpdate(name: name, note: text))
+    }
+
+    static func deleteNote(id noteID: Int) async throws {
+        let _: MessageResponse = try await APIClient.delete("molNotes/\(noteID)")
+    }
+
+    // MARK: - home page notes (the user's own notes, not tied to a molecule)
+
     static func fetchUserNotes(userID: Int) async throws -> [UserNote] {
         try await APIClient.get("userNotes/\(userID)")
+    }
+
+    static func addUserNote(name: String, text: String?, userID: Int) async throws -> UserNote {
+        let created: UserNoteCreatedResponse = try await APIClient.post(
+            "userNotes",
+            body: UserNoteCreate(name: name, note: text, idUser: userID)
+        )
+        return UserNote(idUserNotes: created.idUserNotes, name: name, note: text, idUser: userID)
+    }
+
+    static func updateUserNote(id noteID: Int, name: String, text: String?) async throws {
+        let _: MessageResponse = try await APIClient.put("userNotes/\(noteID)", body: NoteUpdate(name: name, note: text))
+    }
+
+    static func deleteUserNote(id noteID: Int) async throws {
+        let _: MessageResponse = try await APIClient.delete("userNotes/\(noteID)")
     }
 }
