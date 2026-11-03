@@ -1,9 +1,14 @@
 from fastapi import APIRouter
 from database import SessionLocal
 from Models.molecule import Molecule
-from schemas import MoleculeCreate, MoleculeUpdate
+from Validation.rdkitValidation import validate_molecule
+from schemas import MoleculeCreate, MoleculeUpdate, ValidateRequest
 
 router = APIRouter()
+
+@router.post("/molecules/validate")
+def validate(req: ValidateRequest):
+    return validate_molecule(req.atoms, req.bonds)
 
 @router.post("/molecules")
 def create_molecule(molecule: MoleculeCreate):

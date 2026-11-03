@@ -14,6 +14,7 @@ def create_atom(atom: AtomCreate):
             xcoord=atom.xcoord,
             ycoord=atom.ycoord,
             zcoord=atom.zcoord,
+            charge=atom.charge,
             idMolecule=atom.idMolecule
         )
         db.add(new_atom)
@@ -28,7 +29,7 @@ def get_atoms(molecule_id: int):
     db = SessionLocal()
     try:
         atoms = db.query(Atom).filter(Atom.idMolecule == molecule_id).all()
-        return [{"idAtom": a.idAtom, "name": a.name, "xcoord": a.xcoord, "ycoord": a.ycoord, "zcoord": a.zcoord} for a in atoms]
+        return [{"idAtom": a.idAtom, "name": a.name, "xcoord": a.xcoord, "ycoord": a.ycoord, "zcoord": a.zcoord, "charge": a.charge} for a in atoms]
     finally:
         db.close()
 
@@ -43,6 +44,7 @@ def update_atom(atom_id: int, atom: AtomUpdate):
         existing_atom.xcoord = atom.xcoord
         existing_atom.ycoord = atom.ycoord
         existing_atom.zcoord = atom.zcoord
+        existing_atom.charge = atom.charge
         db.commit()
         return {"message": "Atom updated!"}
     finally:
