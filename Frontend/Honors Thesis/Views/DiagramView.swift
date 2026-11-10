@@ -34,6 +34,9 @@ struct DiagramView: View {
                 .disabled(!viewModel.canShowDiagram)
             }
 
+            AxialEquatorialControls(viewModel: viewModel) //only shows up for chair cyclohexane
+                .frame(maxWidth: 400)
+
 
             if let layouts = viewModel.currentDiagram, viewModel.canShowDiagram {
                 //redraws every frame; progress goes 0 -> 1 over `duration` seconds after morphStart
@@ -45,7 +48,9 @@ struct DiagramView: View {
                         bonds: viewModel.bonds,
                         layouts: layouts,
                         kind: viewModel.diagramKind,
-                        progress: t * t * (3 - 2 * t) //smoothstep: starts and ends gently
+                        progress: t * t * (3 - 2 * t), //smoothstep: starts and ends gently
+                        keptHydrogens: viewModel.keptHydrogenIDs,
+                        highlights: highlights
                     )
                 }
             } else {
@@ -59,6 +64,9 @@ struct DiagramView: View {
         }
         .onAppear { morphStart = Date() }                          //play when you open the tab
         .onChange(of: viewModel.diagramKind) { morphStart = Date() } //and when you switch Lewis <-> bond-line
+        .onChange(of: viewModel.showAxialEquatorial) { _, isOn in
+            if isOn { morphStart = Date() } //turning on axial/equatorial replays the morph with them kept in
+        }
         .onChange(of: viewModel.selectedConformer) {
             //replay once the molecule has finished gliding into the new shape
             Task {
@@ -69,6 +77,17 @@ struct DiagramView: View {
     }
 }
 
+extension DiagramView {
+    //which bonds get colored (bond id -> axial or equatorial), from the checkboxes
+    fileprivate var highlights: [Int: AxialKind] {
+        var result: [Int: AxialKind] = [:]
+        for bond in viewModel.bonds {
+            if let kind = viewModel.highlight(for: bond) { result[bond.idBond] = kind }
+        }
+        return result
+    }
+}
+
 //draws one frame of the morph: progress 0 = your 2D drawing, 1 = the finished diagram
 private struct DiagramDrawing: View {
     let atoms: [Atom]
@@ -76,6 +95,8 @@ private struct DiagramDrawing: View {
     let layouts: DiagramLayouts
     let kind: DiagramKind
     let progress: Double
+    var keptHydrogens: Set<Int> = []      //ring H's that stay in bond-line (axial/equatorial switch is on)
+    var highlights: [Int: AxialKind] = [:] //bonds colored by the "Show axial" / "Show equatorial" checkboxes
 
     private let atomRadius: CGFloat = 20 //same size as the 2D view's atoms
 
@@ -85,6 +106,8 @@ private struct DiagramDrawing: View {
             let start = fitDrawing(in: size)
             let end = fitDiagram(in: size)
             let skeletal = Dictionary(uniqueKeysWithValues: layouts.skeletal.map { ($0.atomId, $0) })
+            //everything that's still in the bond-line drawing (the skeleton + any kept H's)
+            let bondLineIDs = Set(skeletal.keys).union(keptHydrogens)
 
             //where each atom is drawn this frame
             var shown: [Int: CGPoint] = [:]
@@ -97,7 +120,7 @@ private struct DiagramDrawing: View {
             for bond in bonds {
                 guard let a = shown[bond.idAtom1], let b = shown[bond.idAtom2] else { continue }
                 var opacity: CGFloat = 1
-                if kind == .bondLine && !(skeletal[bond.idAtom1] != nil && skeletal[bond.idAtom2] != nil) {
+                if kind == .bondLine && !(bondLineIDs.contains(bond.idAtom1) && bondLineIDs.contains(bond.idAtom2)) {
                     opacity = 1 - p
                 }
                 //chair/boat drawings: the closest bonds get bolder as it flattens (the textbook bold front edge)
@@ -105,7 +128,13 @@ private struct DiagramDrawing: View {
                 if let closeness = layouts.closeness(of: bond, kind: kind) {
                     width = 3 * (1 - p) + (2 + 3 * CGFloat(closeness * closeness)) * p //2pt at the back, 5pt at the front
                 }
-                drawBond(from: a, to: b, type: bond.bondType, opacity: opacity, width: width, in: &context)
+                //axial/equatorial highlight: that color, a bit thicker so it stands out
+                var color = Color.gray
+                if let highlight = highlights[bond.idBond] {
+                    color = Color(red: highlight.rgb.red, green: highlight.rgb.green, blue: highlight.rgb.blue)
+                    width += 1.5
+                }
+                drawBond(from: a, to: b, type: bond.bondType, opacity: opacity, width: width, color: color, in: &context)
             }
 
             // atoms: the colored balls shrink away and the diagram's labels fade in
@@ -143,7 +172,9 @@ private struct DiagramDrawing: View {
                 case .lewis:
                     label = atom.name
                 case .bondLine:
-                    if atom.name != "C", let skeletalPoint = skeletal[atom.idAtom] {
+                    if keptHydrogens.contains(atom.idAtom) {
+                        label = "H" //kept so you can see its axial/equatorial bond
+                    } else if atom.name != "C", let skeletalPoint = skeletal[atom.idAtom] {
                         label = atom.name + hydrogenSuffix(skeletalPoint.hydrogens ?? 0)
                     } else {
                         label = nil
@@ -178,7 +209,11 @@ private struct DiagramDrawing: View {
 
     //the backend's flat diagram; anything it leaves out (H's in bond-line) sits on the atom it's bonded to
     private func fitDiagram(in size: CGSize) -> [Int: CGPoint] {
-        let layout = kind == .lewis ? layouts.lewis : layouts.skeletal
+        var layout = kind == .lewis ? layouts.lewis : layouts.skeletal
+        if kind == .bondLine {
+            //kept H's: the Lewis drawing has their spots (chair drawings use the same view for both)
+            layout += layouts.lewis.filter { keptHydrogens.contains($0.atomId) }
+        }
         var fitted = fit(layout.map { (id: $0.atomId, x: CGFloat($0.x), y: CGFloat($0.y)) }, in: size, maxScale: 60)
         for atom in atoms where fitted[atom.idAtom] == nil {
             let neighbor = bonds.compactMap { bond -> Int? in
@@ -217,7 +252,8 @@ private struct DiagramDrawing: View {
 
     // MARK: - drawing pieces
 
-    private func drawBond(from start: CGPoint, to end: CGPoint, type: BondType, opacity: CGFloat, width: CGFloat = 3, in context: inout GraphicsContext) {
+    private func drawBond(from start: CGPoint, to end: CGPoint, type: BondType, opacity: CGFloat, width: CGFloat = 3,
+                          color: Color = .gray, in context: inout GraphicsContext) {
         guard opacity > 0.01 else { return }
         let dx = end.x - start.x, dy = end.y - start.y
         let length = (dx * dx + dy * dy).squareRoot()
@@ -229,7 +265,7 @@ private struct DiagramDrawing: View {
             var path = Path()
             path.move(to: CGPoint(x: start.x + side.x * offset, y: start.y + side.y * offset))
             path.addLine(to: CGPoint(x: end.x + side.x * offset, y: end.y + side.y * offset))
-            context.stroke(path, with: .color(.gray.opacity(Double(opacity))), style: StrokeStyle(lineWidth: width, lineCap: .round))
+            context.stroke(path, with: .color(color.opacity(Double(opacity))), style: StrokeStyle(lineWidth: width, lineCap: .round))
         }
     }
 

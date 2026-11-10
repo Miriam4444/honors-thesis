@@ -12,6 +12,8 @@ import RealityKit
 private class DragState {
     var startPositions: [Int: SIMD3<Float>] = [:] //atom id -> position when the drag started
     var panelStartOffset: SIMD3<Float>? //where a panel was when you grabbed its grab bar
+    var spinStart: simd_quatf? //how the molecule was turned when you started spinning it (iPad/Mac)
+    var zoomStart: Float?      //how zoomed in it was when you started pinching (iPad/Mac)
 }
 
 //the flat plane the diagram gets drawn on. picked once when the morph starts so it faces you,
@@ -52,6 +54,18 @@ private enum SceneAssets {
     static let paneMaterial = SimpleMaterial(color: SimpleMaterial.Color(white: 0.96, alpha: 1), roughness: 0.9, isMetallic: false)
 
     private static var atomMaterials: [String: SimpleMaterial] = [:]
+    private static var highlightMaterials: [AxialKind: SimpleMaterial] = [:]
+
+    //axial/equatorial highlight colors (same as the 2D diagram's)
+    static func highlightedBondMaterial(_ highlight: AxialKind?) -> SimpleMaterial {
+        guard let highlight else { return bondMaterial }
+        if let cached = highlightMaterials[highlight] { return cached }
+        let c = highlight.rgb
+        let material = SimpleMaterial(color: SimpleMaterial.Color(red: CGFloat(c.red), green: CGFloat(c.green), blue: CGFloat(c.blue), alpha: 1),
+                                      isMetallic: false)
+        highlightMaterials[highlight] = material
+        return material
+    }
     private static var electronMaterials: [String: UnlitMaterial] = [:]
     private static var labelMeshes: [String: MeshResource] = [:]
 
@@ -106,6 +120,12 @@ struct Molecule3DView: View {
     @State private var isDropTargeted = false //true while you're dragging an element over the space
     @State private var sceneState = SceneState()
 
+    //iPad/Mac only: drag empty space to spin the molecule, pinch to zoom (vision pro has your real head for that)
+    @State private var viewSpin = simd_quatf(angle: 0, axis: [0, 1, 0]) //no turn
+    @State private var viewZoom: Float = 1
+    private let zoomRange: ClosedRange<Float> = 0.3...5
+    private var viewIsChanged: Bool { viewZoom != 1 || abs(viewSpin.angle) > 0.001 }
+
     var body: some View {
         if isImmersive {
             // nothing behind it, no drop zone: atoms just float in the room
@@ -137,6 +157,17 @@ struct Molecule3DView: View {
             }
             content.add(root)
 
+            if !isImmersive {
+                //an invisible wall behind the molecule: dragging on empty space hits this,
+                //which is how a drag knows to spin the view instead of moving an atom
+                let background = Entity()
+                background.name = "background"
+                background.components.set(CollisionComponent(shapes: [.generateBox(width: 20, height: 20, depth: 0.01)]))
+                background.components.set(InputTargetComponent())
+                background.position = SIMD3(0, 0, -1) //behind everything, so atoms and bonds get picked first
+                content.add(background)
+            }
+
             #if os(visionOS)
             //the floating panels (sidebar + notes) that follow your head around
             if isImmersive {
@@ -160,12 +191,20 @@ struct Molecule3DView: View {
             #endif
 
             guard let root = content.entities.first(where: { $0.name == "root" }) else { return }
+            if !isImmersive {
+                //the whole molecule turns and zooms together (around the middle of the view)
+                root.orientation = viewSpin
+                root.scale = SIMD3(repeating: viewZoom)
+            }
             //rebuild the scene from the view model every time it changes
             //(during the diagram morph that's every frame, which is why the meshes are cached)
             rebuildMolecule(in: root)
         }
         .simultaneousGesture(tapGesture)
         .simultaneousGesture(dragGesture)
+        //pinch-to-zoom is for the flat window only. in the room it's switched off completely, because a
+        //gesture on the whole space also grabs pinches meant for the floating panels (like scrolling the sidebar)
+        .simultaneousGesture(zoomGesture, including: isImmersive ? .none : .all)
     }
 
     //the flat-window version (iPad / Mac): same molecule, plus a drop zone for the sidebar
@@ -180,7 +219,9 @@ struct Molecule3DView: View {
                     //the 3D origin is the middle of this view and y goes up in 3D but down on screen
                     let x = pointsToMeters(location.x - geometry.size.width / 2)
                     let y = -pointsToMeters(location.y - geometry.size.height / 2)
-                    viewModel.addAtom(element: element, at: (x, y, 0))
+                    //undo the spin + zoom so the atom lands under your finger even when the view is turned
+                    let spot = viewToMolecule(SIMD3(x, y, 0))
+                    viewModel.addAtom(element: element, at: (spot.x, spot.y, spot.z))
                     return true
                 } isTargeted: { targeted in
                     isDropTargeted = targeted
@@ -191,7 +232,83 @@ struct Molecule3DView: View {
                         .stroke(isDropTargeted ? Color.green : Color.gray.opacity(0.3), lineWidth: isDropTargeted ? 4 : 1)
                         .allowsHitTesting(false)
                 )
+                //how to move around + a way back to the starting view
+                .overlay(alignment: .bottomTrailing) {
+                    HStack(spacing: 10) {
+                        Text("Drag empty space to spin · pinch to zoom")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        //zoom buttons: for a mouse with no trackpad, the simulator, or anyone who finds pinching awkward
+                        ControlGroup {
+                            Button {
+                                zoom(by: 1 / 1.25)
+                            } label: {
+                                Label("Zoom out", systemImage: "minus.magnifyingglass")
+                            }
+                            .disabled(viewZoom <= zoomRange.lowerBound)
+                            Button {
+                                zoom(by: 1.25)
+                            } label: {
+                                Label("Zoom in", systemImage: "plus.magnifyingglass")
+                            }
+                            .disabled(viewZoom >= zoomRange.upperBound)
+                        }
+                        .labelStyle(.iconOnly)
+                        .fixedSize()
+                        if viewIsChanged {
+                            Button {
+                                withAnimation {
+                                    viewSpin = simd_quatf(angle: 0, axis: [0, 1, 0])
+                                    viewZoom = 1
+                                }
+                            } label: {
+                                Label("Reset view", systemImage: "arrow.counterclockwise")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(10)
+                }
         }
+    }
+
+    //a spot/direction in the window's space -> the same spot in the molecule's own (unturned, unzoomed) space
+    private func viewToMolecule(_ point: SIMD3<Float>) -> SIMD3<Float> {
+        viewSpin.inverse.act(point) / viewZoom
+    }
+
+    // MARK: - spin + zoom (iPad / Mac)
+
+    //drag on empty space: left/right turns the molecule around, up/down tips it toward/away from you
+    private func spin(by translation: CGSize) {
+        if dragState.spinStart == nil { dragState.spinStart = viewSpin }
+        let radiansPerPoint: Float = 0.4 * .pi / 180 //0.4 degrees per point you drag
+        let turn = simd_quatf(angle: Float(translation.width) * radiansPerPoint, axis: [0, 1, 0])
+        let tip = simd_quatf(angle: Float(translation.height) * radiansPerPoint, axis: [1, 0, 0])
+        //applied on top of where it started, in screen directions, so it always turns the way your finger goes
+        viewSpin = (turn * tip * (dragState.spinStart ?? viewSpin)).normalized
+    }
+
+    //the + / - buttons: zoom a step in or out, smoothly, without going past the limits
+    private func zoom(by factor: Float) {
+        withAnimation {
+            viewZoom = min(max(viewZoom * factor, zoomRange.lowerBound), zoomRange.upperBound)
+        }
+    }
+
+    //pinch (or trackpad pinch on Mac) to zoom
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                guard !isImmersive else { return }
+                if dragState.zoomStart == nil { dragState.zoomStart = viewZoom }
+                let zoomed = (dragState.zoomStart ?? viewZoom) * Float(value.magnification)
+                viewZoom = min(max(zoomed, zoomRange.lowerBound), zoomRange.upperBound)
+            }
+            .onEnded { _ in
+                dragState.zoomStart = nil
+            }
     }
 
     // MARK: - building the scene
@@ -224,7 +341,7 @@ struct Molecule3DView: View {
             }
         }
 
-        let skeletalIDs = Set(viewModel.currentDiagram?.skeletal.map(\.atomId) ?? [])
+        let skeletalIDs = bondLineIDs
 
         // atoms
         for atom in viewModel.atoms {
@@ -238,9 +355,11 @@ struct Molecule3DView: View {
         // bonds
         var thickness: [Int: Float] = [:]
         for bond in viewModel.bonds {
+            let highlight = viewModel.highlight(for: bond) //axial/equatorial checkboxes (chair cyclohexane)
             thickness[bond.idBond] = bondThickness(bond, kind: kind, progress: progress, skeletalIDs: skeletalIDs)
+                * (highlight == nil ? 1 : 1.4) //a bit thicker so the colored ones stand out
             for line in 0..<lineCount(for: bond.bondType) {
-                let cylinder = ModelEntity(mesh: SceneAssets.bondMesh, materials: [SceneAssets.bondMaterial])
+                let cylinder = ModelEntity(mesh: SceneAssets.bondMesh, materials: [SceneAssets.highlightedBondMaterial(highlight)])
                 cylinder.name = "bond-\(bond.idBond)-\(line)"
                 if interactive {
                     //a fatter invisible box around the bond so it's easy to tap (for delete mode)
@@ -327,7 +446,12 @@ struct Molecule3DView: View {
         guard let layouts = viewModel.currentDiagram else { return [:] } //this shape's chair/boat drawing, or the flat one
         let center = moleculeCenter()
         let scale = MoleculeBuilderVM.angstromToScene
-        let points = viewModel.diagramKind == .lewis ? layouts.lewis : layouts.skeletal
+        var points = viewModel.diagramKind == .lewis ? layouts.lewis : layouts.skeletal
+        if viewModel.diagramKind == .bondLine {
+            //ring H's kept for axial/equatorial: the Lewis drawing has their spots (chair drawings use the same view for both)
+            let kept = viewModel.keptHydrogenIDs
+            points += layouts.lewis.filter { kept.contains($0.atomId) }
+        }
 
         var targets: [Int: SIMD3<Float>] = [:]
         for point in points {
@@ -339,6 +463,11 @@ struct Molecule3DView: View {
             targets[atom.idAtom] = neighbor.flatMap { targets[$0] } ?? center
         }
         return targets
+    }
+
+    //everything that's still in the bond-line drawing: the skeleton, plus the ring H's kept for axial/equatorial
+    private var bondLineIDs: Set<Int> {
+        Set(viewModel.currentDiagram?.skeletal.map(\.atomId) ?? []).union(viewModel.keptHydrogenIDs)
     }
 
     private func neighborIDs(of atomID: Int) -> [Int] {
@@ -426,7 +555,7 @@ struct Molecule3DView: View {
         for atom in viewModel.atoms {
             guard let position = shown[atom.idAtom] else { continue }
             //carbons and hydrogens aren't written in bond-line drawings
-            guard hasLabel(atom, kind: kind, skeletalIDs: Set(skeletal.keys)) else { continue }
+            guard hasLabel(atom, kind: kind, skeletalIDs: bondLineIDs) else { continue }
             let text: String
             switch kind {
             case .lewis:
@@ -539,7 +668,9 @@ struct Molecule3DView: View {
     //tap an atom to pick it for bonding, or in delete mode tap an atom/bond to remove it
     private var tapGesture: some Gesture {
         TapGesture()
-            .targetedToAnyEntity()
+            //only the molecule's own pieces (atoms, bonds, the spin wall all have collision shapes).
+            //"any entity" would also include the floating panels, so their scroll views couldn't scroll
+            .targetedToEntity(where: .has(CollisionComponent.self))
             .onEnded { value in
                 if let atomID = extractAtomID(from: value.entity.name) {
                     viewModel.tapAtom(atomID)
@@ -552,8 +683,15 @@ struct Molecule3DView: View {
     //drag an atom to move it (or its whole molecule, depending on the toggle)
     private var dragGesture: some Gesture {
         DragGesture()
-            .targetedToAnyEntity()
+            //only the molecule's own pieces (atoms, bonds, the spin wall all have collision shapes).
+            //"any entity" would also include the floating panels, so their scroll views couldn't scroll
+            .targetedToEntity(where: .has(CollisionComponent.self))
             .onChanged { value in
+                //dragging empty space (the invisible wall behind the molecule) spins the view
+                if value.entity.name == "background" {
+                    spin(by: value.translation)
+                    return
+                }
                 guard !viewModel.isShowingDiagram, //no moving atoms while it's a diagram
                       let grabbedID = extractAtomID(from: value.entity.name),
                       let root = value.entity.parent else { return }
@@ -578,10 +716,11 @@ struct Molecule3DView: View {
                 let start = value.convert(value.startLocation3D, from: .local, to: root)
                 delta = now - start
                 #else
-                //on iPhone/iPad/Mac the drag is 2D so move in x/y only
-                delta = SIMD3(Float(value.translation.width) * 0.001,
-                              -Float(value.translation.height) * 0.001,
-                              0)
+                //on iPhone/iPad/Mac the drag is 2D: move across the screen, then undo the spin + zoom
+                //so the atom follows your finger even when the molecule is turned
+                delta = viewToMolecule(SIMD3(Float(value.translation.width) * 0.001,
+                                             -Float(value.translation.height) * 0.001,
+                                             0))
                 #endif
 
                 for (id, startPosition) in dragState.startPositions {
@@ -590,6 +729,10 @@ struct Molecule3DView: View {
                 layoutBonds(in: root) //bonds stretch along while you drag
             }
             .onEnded { value in
+                if value.entity.name == "background" {
+                    dragState.spinStart = nil
+                    return
+                }
                 guard let root = value.entity.parent else {
                     dragState.startPositions = [:]
                     return

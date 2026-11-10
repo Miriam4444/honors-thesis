@@ -23,6 +23,8 @@ struct BuilderSidebarView: View {
     @State private var search = ""
     @State private var showInfo = false
     @State private var showShapeList = false
+    @State private var showCommonAtoms = true //the atom sections can be folded up to make room
+    @State private var showAllElements = true
 
     //common ones are big, the full list is smaller so lots fit
     private let commonColumns = Array(repeating: GridItem(.fixed(52), spacing: 8), count: 3)
@@ -46,28 +48,32 @@ struct BuilderSidebarView: View {
                 Divider()
             }
 
-            // MARK: common atoms
-            sectionTitle("Common atoms")
-            LazyVGrid(columns: commonColumns, spacing: 8) {
-                ForEach(Elements.common) { element in
-                    elementButton(element, size: 52, font: .title3)
+            // MARK: common atoms (tap the title to hide/show)
+            collapsibleTitle("Common atoms", isExpanded: $showCommonAtoms)
+            if showCommonAtoms {
+                LazyVGrid(columns: commonColumns, spacing: 8) {
+                    ForEach(Elements.common) { element in
+                        elementButton(element, size: 52, font: .title3)
+                    }
                 }
             }
 
-            // MARK: every element
-            sectionTitle("All elements")
-            TextField("Search", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 178)
-            ScrollView {
-                LazyVGrid(columns: allColumns, spacing: 6) {
-                    ForEach(filteredElements) { element in
-                        elementButton(element, size: 40, font: .callout)
+            // MARK: every element (tap the title to hide/show)
+            collapsibleTitle("All elements", isExpanded: $showAllElements)
+            if showAllElements {
+                TextField("Search", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 178)
+                ScrollView {
+                    LazyVGrid(columns: allColumns, spacing: 6) {
+                        ForEach(filteredElements) { element in
+                            elementButton(element, size: 40, font: .callout)
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
+                .frame(height: showsMoleculeControls ? 140 : 190) //shorter on vision pro since the sidebar has more in it
             }
-            .frame(height: showsMoleculeControls ? 140 : 190) //shorter on vision pro since the sidebar has more in it
 
             // MARK: bonds
             sectionTitle("Bonds")
@@ -197,6 +203,19 @@ struct BuilderSidebarView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
+            //fills every open bond with an H, then validates (hidden once the molecule is valid)
+            if viewModel.canAddHydrogens {
+                Button {
+                    viewModel.addMissingHydrogens()
+                } label: {
+                    Label(viewModel.isAddingHydrogens ? "Adding hydrogens..." : "Add missing hydrogens",
+                          systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(viewModel.isAddingHydrogens)
+            }
+
             Button {
                 showInfo.toggle()
             } label: {
@@ -223,6 +242,26 @@ struct BuilderSidebarView: View {
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.headline)
+    }
+
+    //a section title you can tap to fold the section up; the arrow points down when it's open, right when it's folded
+    private func collapsibleTitle(_ text: String, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack {
+                Text(text)
+                    .font(.headline)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : -90))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle()) //the whole row is tappable, not just the words
+        }
+        .buttonStyle(.plain)
     }
 
     //tap = add it near the middle. on iPad/Mac you can also drag it to an exact spot

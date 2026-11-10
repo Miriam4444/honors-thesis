@@ -213,6 +213,18 @@ struct MoleculeBuilderView: View {
                 .disabled(!viewModel.canSave) //locked until validate passes
             }
 
+            //fills every open bond with an H, then validates (hidden once the molecule is valid)
+            if viewModel.canAddHydrogens {
+                Button {
+                    viewModel.addMissingHydrogens()
+                } label: {
+                    Label(viewModel.isAddingHydrogens ? "Adding hydrogens..." : "Add missing hydrogens",
+                          systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isAddingHydrogens)
+            }
+
             HStack(spacing: 16) {
                 //iPhone only: everywhere else the notes button lives in the sidebar
                 if showsEditingTools {

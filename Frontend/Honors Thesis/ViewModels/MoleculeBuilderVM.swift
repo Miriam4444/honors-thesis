@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import simd //vector math for placing the new hydrogens
 
 // tracks where the molecule is in the validate -> save flow
 enum ValidationState: Equatable {
@@ -53,6 +54,7 @@ class MoleculeBuilderVM: ObservableObject {
     @Published var notes: [MolNote] = [] //this molecule's notes (saved ones and ones waiting for the first save)
     @Published var savedMoleculeID: Int? = nil //nil  if it's never saved so save makes a new molecule
     @Published var isValidating = false
+    @Published var isAddingHydrogens = false
     @Published var problemAtomIDs: Set<Int> = [] //atoms the backend flagged, so the view can highlight them
     private var validationRun = 0 //bumps on every edit so an old result can't unlock save
     @Published var isDeleteMode = false //when on, tapping an atom or bond removes it
@@ -66,6 +68,20 @@ class MoleculeBuilderVM: ObservableObject {
     @Published var panelOffsets: [String: SIMD3<Float>] = [:] //how far you've dragged each floating panel from its home spot (by panel name)
     //how far the floating molecule has morphed: 0 = normal 3D molecule, 1 = flat diagram
     @Published var diagramProgress: Double = 0
+
+    // MARK: axial + equatorial bonds (chair cyclohexane)
+    //turning this on plays the diagram and keeps the ring's axial/equatorial bonds (and their H's) in it,
+    //even in bond-line, where H's normally disappear
+    @Published var showAxialEquatorial = false {
+        didSet {
+            #if os(visionOS)
+            //vision pro: flatten the floating molecule right away (iPad/Mac's Diagram tab replays on its own)
+            if showAxialEquatorial && !oldValue && canShowAxialEquatorial { playDiagram() }
+            #endif
+        }
+    }
+    @Published var highlightAxial = false      //"Show axial": color the axial bonds
+    @Published var highlightEquatorial = false //"Show equatorial": color the equatorial bonds
 
     // MARK: shapes (conformers)
     @Published var conformers: [Conformer] = [] //from the backend after a successful validate, most stable first
@@ -87,6 +103,12 @@ class MoleculeBuilderVM: ObservableObject {
     //save only works after a successful validate
     var canSave: Bool {
         validationState == .valid && !isSaving
+    }
+
+    //the "Add missing hydrogens" button: any time there's a molecule that hasn't passed validation yet
+    //(before or after validating). a valid molecule has nothing missing, so it hides then
+    var canAddHydrogens: Bool {
+        !atoms.isEmpty && validationState != .valid
     }
 
     //structure info only makes sense for a molecule that passed validation
@@ -153,6 +175,39 @@ class MoleculeBuilderVM: ObservableObject {
         shapeTask = nil
         conformers = [] //the shapes were for the old molecule too
         selectedConformer = 0
+    }
+
+    // MARK: - axial + equatorial
+
+    //only chairs have axial/equatorial bonds (the backend sends them for chair-shaped 6-rings like cyclohexane)
+    var canShowAxialEquatorial: Bool {
+        canShowDiagram && !(currentDiagram?.axialEquatorial ?? []).isEmpty
+    }
+
+    //the molecule has a chair, just not the shape you're looking at (like a twist-boat)
+    var hasChairInAnotherShape: Bool {
+        canShowDiagram && !canShowAxialEquatorial
+            && conformers.contains { !($0.diagram?.axialEquatorial ?? []).isEmpty }
+    }
+
+    private var axialEquatorialIsOn: Bool {
+        showAxialEquatorial && canShowAxialEquatorial
+    }
+
+    //which color a bond gets right now: nil = normal gray
+    func highlight(for bond: Bond) -> AxialKind? {
+        guard axialEquatorialIsOn, let kind = currentDiagram?.axialKind(of: bond) else { return nil }
+        switch kind {
+        case .axial: return highlightAxial ? .axial : nil
+        case .equatorial: return highlightEquatorial ? .equatorial : nil
+        }
+    }
+
+    //the H's on the ring that stay in the bond-line diagram so you can still see their axial/equatorial bonds
+    var keptHydrogenIDs: Set<Int> {
+        guard axialEquatorialIsOn, let list = currentDiagram?.axialEquatorial else { return [] }
+        let hydrogens = Set(atoms.filter { $0.name == "H" }.map(\.idAtom))
+        return Set(list.map(\.otherAtom)).intersection(hydrogens)
     }
 
     // MARK: - shapes
@@ -545,6 +600,95 @@ class MoleculeBuilderVM: ObservableObject {
             isValidating = false
         }
     }
+    // MARK: - add missing hydrogens
+
+    //the backend (RDKit) works out how many H's each atom is missing, then we add them,
+    //bond each one to its atom, and validate again, which also snaps everything into the real shape
+    func addMissingHydrogens() {
+        guard !atoms.isEmpty, !isAddingHydrogens else { return }
+        isAddingHydrogens = true
+        statusMessage = "Figuring out which hydrogens are missing..."
+        let run = validationRun
+        let atomsToCheck = atoms
+        let bondsToCheck = bonds
+
+        Task {
+            do {
+                let result = try await MoleculeService.missingHydrogens(atoms: atomsToCheck, bonds: bondsToCheck)
+                //if they edited while it was thinking, the answer is for an old molecule, so ignore it
+                guard run == validationRun else { isAddingHydrogens = false; return }
+
+                var added = 0
+                for missing in result.hydrogens {
+                    added += addHydrogens(missing.count, to: missing.atomId)
+                }
+                if added > 0 {
+                    moleculeChanged()
+                }
+
+                if !result.errors.isEmpty {
+                    //some problems can't be fixed with hydrogens (like too many bonds), so point those out
+                    problemAtomIDs = Set(result.errors.compactMap { $0.atomId })
+                    let first = result.errors.first?.message ?? "Something's off with this molecule"
+                    validationState = .invalid(first)
+                    statusMessage = added > 0 ? "Added \(added) hydrogen\(added == 1 ? "" : "s"), but: \(first)" : first
+                } else if added > 0 {
+                    statusMessage = "Added \(added) hydrogen\(added == 1 ? "" : "s"). Checking it again..."
+                    isAddingHydrogens = false
+                    validate() //should pass now, and snaps the new H's into the right spots
+                    return
+                } else if case .invalid = validationState {
+                    statusMessage = "No hydrogens are missing, so the problem is something else"
+                } else {
+                    statusMessage = "No hydrogens are missing. Tap Validate to check the rest."
+                }
+            } catch {
+                statusMessage = "Couldn't add hydrogens: \(error.localizedDescription)"
+            }
+            isAddingHydrogens = false
+        }
+    }
+
+    //adds `count` H's around one atom, each bonded to it, pointing away from its other bonds
+    //(only roughly placed: validating right after moves them to the real geometry)
+    //returns how many it added
+    private func addHydrogens(_ count: Int, to atomID: Int) -> Int {
+        guard count > 0, let parent = atoms.first(where: { $0.idAtom == atomID }) else { return 0 }
+        let center = SIMD3(parent.xcoord, parent.ycoord, parent.zcoord)
+        let bondLength = 1.1 * Self.angstromToScene //about a real C-H bond, in scene units
+
+        //the direction pointing away from the atoms it's already bonded to
+        var away = SIMD3<Float>(0, 0, 0)
+        var hasNeighbors = false
+        for bond in bonds where bond.idAtom1 == atomID || bond.idAtom2 == atomID {
+            let otherID = bond.idAtom1 == atomID ? bond.idAtom2 : bond.idAtom1
+            guard let other = atoms.first(where: { $0.idAtom == otherID }) else { continue }
+            let toCenter = center - SIMD3(other.xcoord, other.ycoord, other.zcoord)
+            if simd_length(toCenter) > 0.0001 { away += simd_normalize(toCenter) }
+            hasNeighbors = true
+        }
+        let baseAngle = simd_length(away) > 0.0001 ? atan2(away.y, away.x) : Float.pi / 2
+
+        for k in 0..<count {
+            //no bonds yet: spread evenly all the way around. otherwise: fan out on the open side
+            let angle: Float
+            if hasNeighbors {
+                let step = min(60, 240 / Float(count)) * .pi / 180
+                angle = baseAngle + (Float(k) - Float(count - 1) / 2) * step
+            } else {
+                angle = baseAngle + Float(k) * 2 * .pi / Float(count)
+            }
+            let spot = center + bondLength * SIMD3(cos(angle), sin(angle), 0)
+            atoms.append(Atom(idAtom: nextAtomID, idMolecule: nil, name: "H",
+                              xcoord: spot.x, ycoord: spot.y, zcoord: spot.z))
+            bonds.append(Bond(idBond: nextBondID, idMolecule: nil,
+                              idAtom1: atomID, idAtom2: nextAtomID, bondType: .single))
+            nextAtomID += 1
+            nextBondID += 1
+        }
+        return count
+    }
+
     func save() {
         guard canSave else { return }
         let name = moleculeName.trimmingCharacters(in: .whitespacesAndNewlines)

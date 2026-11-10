@@ -26,6 +26,14 @@ private struct ValidateRequest: Encodable { let atoms: [ValidateAtom]; let bonds
 //what /molecules/validate sends back
 struct ValidationIssue: Decodable { let atomId: Int?; let message: String }
 struct AtomPosition: Decodable { let atomId: Int; let x: Float; let y: Float; let z: Float }
+
+//what /molecules/add-hydrogens sends back: how many H's each atom is missing,
+//plus any problems hydrogens can't fix (like a carbon with 5 bonds)
+struct MissingHydrogens: Decodable { let atomId: Int; let count: Int }
+struct HydrogenResult: Decodable {
+    let hydrogens: [MissingHydrogens]
+    let errors: [ValidationIssue]
+}
 struct ValidationResult: Decodable {
     let valid: Bool
     let errors: [ValidationIssue]
@@ -78,6 +86,39 @@ extension DiagramLayouts {
 struct DiagramLayouts: Decodable {
     let lewis: [DiagramPoint]    //every atom, including H
     let skeletal: [DiagramPoint] //no hydrogens, carbons are just corners
+    //chair cyclohexane rings only: which ring bonds point axial vs equatorial (nil for everything else)
+    let axialEquatorial: [AxialEquatorialBond]?
+}
+
+//on a chair, each ring carbon has one bond pointing straight up/down (axial)
+//and one sticking out around the ring's "equator" (equatorial)
+enum AxialKind: String, Decodable {
+    case axial
+    case equatorial
+
+    //highlight colors (red, green, blue from 0 to 1), shared by the 2D diagram and the 3D molecule
+    var rgb: (red: Double, green: Double, blue: Double) {
+        switch self {
+        case .axial: return (0.10, 0.45, 0.95)      //blue
+        case .equatorial: return (1.00, 0.55, 0.05) //orange
+        }
+    }
+}
+
+struct AxialEquatorialBond: Decodable {
+    let ringAtom: Int  //the ring carbon
+    let otherAtom: Int //what it's bonded to (an H, or a CH3 / OH / ... sticking off the ring)
+    let kind: AxialKind
+}
+
+extension DiagramLayouts {
+    //axial, equatorial, or nil if this bond isn't one of them (ring bonds, or not a chair)
+    func axialKind(of bond: Bond) -> AxialKind? {
+        axialEquatorial?.first {
+            ($0.ringAtom == bond.idAtom1 && $0.otherAtom == bond.idAtom2) ||
+            ($0.ringAtom == bond.idAtom2 && $0.otherAtom == bond.idAtom1)
+        }?.kind
+    }
 }
 
 //what a save hands back so the app knows which database rows belong to this molecule now
@@ -93,6 +134,17 @@ struct MoleculeService {
     static func validate(atoms: [Atom], bonds: [Bond]) async throws -> ValidationResult {
         try await APIClient.post(
             "molecules/validate",
+            body: ValidateRequest(
+                atoms: atoms.map { ValidateAtom(idAtom: $0.idAtom, name: $0.name) },
+                bonds: bonds.map { ValidateBond(idAtom1: $0.idAtom1, idAtom2: $0.idAtom2, bondType: $0.bondType) }
+            )
+        )
+    }
+
+    //asks the backend how many hydrogens each atom is missing (same request as validate)
+    static func missingHydrogens(atoms: [Atom], bonds: [Bond]) async throws -> HydrogenResult {
+        try await APIClient.post(
+            "molecules/add-hydrogens",
             body: ValidateRequest(
                 atoms: atoms.map { ValidateAtom(idAtom: $0.idAtom, name: $0.name) },
                 bonds: bonds.map { ValidateBond(idAtom1: $0.idAtom1, idAtom2: $0.idAtom2, bondType: $0.bondType) }

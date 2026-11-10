@@ -39,7 +39,7 @@ extension Notification.Name {
 struct APIClient {
     //simulator shares Mac's network, so localhost is the mac.
     //on a real Vision Pro this has to be macs IP address instead
-    static let baseURL = URL(string: "http://10.71.54.120:8000")!
+    static let baseURL = URL(string: "http://10.71.38.25:8000")!
 
     //the logged-in user's session token. AuthManager sets it after login (and clears it on logout),
     //and every request below sends it in the Authorization header

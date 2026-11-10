@@ -31,6 +31,8 @@ struct DiagramPanelView: View {
             }
             .pickerStyle(.segmented)
 
+            AxialEquatorialControls(viewModel: viewModel)
+
             if viewModel.canShowDiagram {
                 HStack(spacing: 12) {
                     Button {
@@ -65,6 +67,52 @@ struct DiagramPanelView: View {
         }
         .padding(16)
         .frame(width: 340)
+    }
+}
+
+//chair cyclohexane only: a switch to keep the axial/equatorial bonds in the diagram,
+//then "Show axial" / "Show equatorial" checkboxes that color them (either one or both).
+//used by this panel (vision pro) and the Diagram tab (iPhone / iPad / Mac)
+struct AxialEquatorialControls: View {
+    @ObservedObject var viewModel: MoleculeBuilderVM
+
+    var body: some View {
+        if viewModel.canShowAxialEquatorial {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Axial & equatorial bonds", isOn: $viewModel.showAxialEquatorial)
+                if viewModel.showAxialEquatorial {
+                    HStack(spacing: 16) {
+                        checkbox("Show axial", isOn: $viewModel.highlightAxial, kind: .axial)
+                        checkbox("Show equatorial", isOn: $viewModel.highlightEquatorial, kind: .equatorial)
+                    }
+                }
+            }
+        } else if viewModel.hasChairInAnotherShape {
+            //e.g. looking at the twist-boat: axial/equatorial only means something on a chair
+            Text("Axial and equatorial bonds are a chair thing. Pick a Chair shape to see them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    //SwiftUI only has real checkboxes on Mac, so this is a tappable box + label that works everywhere.
+    //the box is drawn in the highlight color, so it doubles as the color key
+    private func checkbox(_ title: String, isOn: Binding<Bool>, kind: AxialKind) -> some View {
+        let color = Color(red: kind.rgb.red, green: kind.rgb.green, blue: kind.rgb.blue)
+        return Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isOn.wrappedValue ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(color)
+                    .font(.title3)
+                Text(title)
+                    .foregroundStyle(.primary)
+                    .fixedSize()
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 

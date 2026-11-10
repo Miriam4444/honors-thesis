@@ -168,7 +168,8 @@ enum Elements {
     static func rgb(for symbol: String) -> (red: Double, green: Double, blue: Double) {
         switch symbol {
         case "H": return (1.00, 1.00, 1.00)  //white
-        case "C": return (0.30, 0.30, 0.30)  //dark gray
+        case "C": return (0.12, 0.12, 0.12)  //black (a hair lighter than pure black so the 3D balls still show shading)
+        case "Ti": return (0.75, 0.76, 0.78) //gray
         case "N": return (0.19, 0.31, 0.97)  //blue
         case "O": return (1.00, 0.05, 0.05)  //red
         case "F", "Cl": return (0.12, 0.94, 0.12) //green
@@ -176,13 +177,26 @@ enum Elements {
         case "I": return (0.58, 0.00, 0.58)  //purple
         case "P": return (1.00, 0.50, 0.00)  //orange
         case "S": return (1.00, 0.80, 0.20)  //yellow
-        case "B": return (1.00, 0.71, 0.71)  //salmon
+        case "B": return beige
         case "Li", "Na", "K", "Rb", "Cs", "Fr": return (0.47, 0.00, 1.00) //violet (alkali metals)
         case "Be", "Mg", "Ca", "Sr", "Ba", "Ra": return (0.00, 0.47, 0.00) //dark green (alkaline earth)
-        case "Fe": return (0.88, 0.40, 0.20) //rust
+        case "Fe": return (0.88, 0.40, 0.20) //dark orange
         case "He", "Ne", "Ar", "Kr", "Xe", "Rn": return (0.00, 1.00, 1.00) //cyan (noble gases)
-        default: return (0.87, 0.47, 1.00)   //pink
+        default:
+            //the rest of the transition metals (columns 3-12) are beige like boron
+            if let element = bySymbol[symbol], isTransitionMetal(element) { return beige }
+            return (0.87, 0.47, 1.00) //pink
         }
+    }
+
+    private static let beige: (red: Double, green: Double, blue: Double) = (0.96, 0.87, 0.70)
+
+    //quick lookup from "Fe" to its ElementInfo
+    private static let bySymbol: [String: ElementInfo] = Dictionary(uniqueKeysWithValues: all.map { ($0.symbol, $0) })
+
+    //columns 3-12, not counting the lanthanides (57-71) and actinides (89-103), which are also listed under column 3
+    private static func isTransitionMetal(_ element: ElementInfo) -> Bool {
+        (3...12).contains(element.group) && !(57...71).contains(element.number) && !(89...103).contains(element.number)
     }
 
     static func color(for symbol: String) -> Color {
