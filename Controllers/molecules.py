@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from database import SessionLocal
 from Models.molecule import Molecule
-from Validation.rdkitValidation import validate_molecule
+from Validation.rdkitValidation import validate_molecule, suggest_hydrogens
 from schemas import MoleculeCreate, MoleculeUpdate, ValidateRequest
 
 router = APIRouter()
@@ -9,6 +9,11 @@ router = APIRouter()
 @router.post("/molecules/validate")
 def validate(req: ValidateRequest):
     return validate_molecule(req.atoms, req.bonds)
+
+#the "add missing hydrogens" button: how many H's each atom needs (the app adds them and validates again)
+@router.post("/molecules/add-hydrogens")
+def add_hydrogens(req: ValidateRequest):
+    return suggest_hydrogens(req.atoms, req.bonds)
 
 @router.post("/molecules")
 def create_molecule(molecule: MoleculeCreate):
