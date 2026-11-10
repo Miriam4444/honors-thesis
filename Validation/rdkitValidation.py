@@ -134,7 +134,29 @@ def _perspective_diagram(mol, conf_id, app_id, ring):
         h_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 1)
         skeletal.append({"atomId": app_id[i], "x": float(flat[i][0]), "y": float(flat[i][1]),
                          "depth": float(depth[i]), "hydrogens": h_count, "inRing": i in ring_set})
-    return {"lewis": lewis, "skeletal": skeletal}
+    result = {"lewis": lewis, "skeletal": skeletal}
+    if not is_boat and k == 6:
+        result["axialEquatorial"] = _axial_equatorial(mol, pos, ring, normal, app_id)
+    return result
+
+
+def _axial_equatorial(mol, pos, ring, normal, app_id):
+    # chair cyclohexane: every ring carbon has one bond pointing straight up or down (axial,
+    # parallel to the ring's axis) and one sticking out sideways around the ring's "equator" (equatorial).
+    # we tell them apart by the angle between the bond and the ring's axis (`normal`):
+    # axial bonds are nearly parallel to it (cos ~ 1), equatorial ones nearly flat (cos ~ 0.3)
+    ring_set = set(ring)
+    bonds = []
+    for i in ring:
+        for neighbor in mol.GetAtomWithIdx(i).GetNeighbors():
+            j = neighbor.GetIdx()
+            if j in ring_set:
+                continue  # ring bonds are neither
+            direction = pos[j] - pos[i]
+            along_axis = abs(np.dot(direction / np.linalg.norm(direction), normal))
+            bonds.append({"ringAtom": app_id[i], "otherAtom": app_id[j],
+                          "kind": "axial" if along_axis > 0.6 else "equatorial"})
+    return bonds
 
 
 def generate_conformers(m, app_id, attempts=30):
@@ -301,3 +323,36 @@ def validate_molecule(atoms, bonds):
         "conformers": shapes,                                       # every distinct shape, most stable first
         "diagram": generate_diagrams(m, app_id),
     }
+
+def suggest_hydrogens(atoms, bonds):
+    # the "fill in hydrogens" button: works out how many H's each atom is missing.
+    # it's the same molecule as validate_molecule, except RDKit is allowed to fill every open bond
+    # with an implicit hydrogen (validate_molecule turns that off so missing H's count as a mistake).
+    # charges are counted too, e.g. O with a -1 charge only wants 1 bond, N with +1 wants 4.
+    # returns {"hydrogens": [{"atomId", "count"}], "errors": [...]} where errors are problems that
+    # adding hydrogens can't fix (like a carbon with 5 bonds)
+    mol = Chem.RWMol()
+    idx = {}
+    for a in atoms:
+        atom = Chem.Atom(a.name)
+        atom.SetFormalCharge(a.charge)
+        idx[a.idAtom] = mol.AddAtom(atom)
+    for b in bonds:
+        mol.AddBond(idx[b.idAtom1], idx[b.idAtom2], BOND[b.bondType.value])
+    app_id = {v: k for k, v in idx.items()}
+
+    errors = []
+    for p in Chem.DetectChemistryProblems(mol):
+        i = p.GetAtomIdx()
+        if p.GetType() == "AtomValenceException":
+            symbol = mol.GetAtomWithIdx(i).GetSymbol()
+            message = f"{symbol} has too many bonds. Adding hydrogens can't fix that, so remove a bond."
+        else:
+            message = p.Message()
+        errors.append({"atomId": app_id.get(i), "message": message})
+
+    # strict=False: still count the H's for the fine atoms even if another atom has too many bonds
+    mol.UpdatePropertyCache(strict=False)
+    hydrogens = [{"atomId": app_id[atom.GetIdx()], "count": atom.GetNumImplicitHs()}
+                 for atom in mol.GetAtoms() if atom.GetNumImplicitHs() > 0]
+    return {"hydrogens": hydrogens, "errors": errors}
