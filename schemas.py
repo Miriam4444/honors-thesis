@@ -88,6 +88,7 @@ class AtomBase(BaseModel):
     ycoord: float
     zcoord: float
     idMolecule: int | None = None
+    charge: int = 0
 
 class AtomCreate(AtomBase):
     pass
@@ -97,6 +98,7 @@ class AtomUpdate(BaseModel):
     xcoord: float
     ycoord: float
     zcoord: float
+    charge: int = 0
 
 class AtomOut(AtomBase):
     idAtom: int
@@ -122,3 +124,17 @@ class UserNoteOut(UserNoteBase):
 
     class Config:
         from_attributes = True
+
+class ValidateAtom(BaseModel):
+    idAtom: int
+    name: str
+    charge: int = 0
+
+class ValidateBond(BaseModel):
+    idAtom1: int
+    idAtom2: int
+    bondType: BondType
+
+class ValidateRequest(BaseModel):
+    atoms: list[ValidateAtom]
+    bonds: list[ValidateBond]
